@@ -26,14 +26,16 @@ body {
 }
 
 /* Markdown preview prose styles */
-.nda-preview h1 { font-size: 1.25rem; font-weight: 700; margin: 1rem 0 0.5rem; }
-.nda-preview h2 { font-size: 1.1rem; font-weight: 700; margin: 1rem 0 0.4rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.25rem; }
-.nda-preview h3 { font-size: 1rem; font-weight: 600; margin: 0.75rem 0 0.3rem; }
-.nda-preview p { margin: 0.4rem 0; font-size: 0.875rem; line-height: 1.6; }
+.nda-preview { color: #111827; }
+.nda-preview h1 { font-size: 1.25rem; font-weight: 700; margin: 1rem 0 0.5rem; color: #111827; }
+.nda-preview h2 { font-size: 1.1rem; font-weight: 700; margin: 1rem 0 0.4rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.25rem; color: #111827; }
+.nda-preview h3 { font-size: 1rem; font-weight: 600; margin: 0.75rem 0 0.3rem; color: #111827; }
+.nda-preview p { margin: 0.4rem 0; font-size: 0.875rem; line-height: 1.6; color: #111827; }
 .nda-preview hr { border: none; border-top: 1px solid #d1d5db; margin: 1rem 0; }
 .nda-preview table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.8rem; }
-.nda-preview td, .nda-preview th { border: 1px solid #d1d5db; padding: 6px 10px; vertical-align: top; }
+.nda-preview td, .nda-preview th { border: 1px solid #d1d5db; padding: 6px 10px; vertical-align: top; color: #111827; }
 .nda-preview a { color: #2563eb; text-decoration: underline; }
 .nda-preview ol { padding-left: 1.5rem; }
-.nda-preview li { font-size: 0.875rem; line-height: 1.6; margin: 0.2rem 0; }
-.nda-preview strong { font-weight: 600; }
+.nda-preview li { font-size: 0.875rem; line-height: 1.6; margin: 0.2rem 0; color: #111827; }
+.nda-preview strong { font-weight: 600; color: #111827; }
+.nda-preview em { color: #374151; }

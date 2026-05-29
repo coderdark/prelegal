@@ -77,32 +77,57 @@ export async function buildNdaHtml(markdown: string): Promise<string> {
 <head>
 <meta charset="UTF-8">
 <style>
+  @page {
+    size: A4;
+    margin: 25mm 20mm 25mm 20mm;
+  }
   body {
     font-family: Georgia, serif;
     font-size: 11pt;
-    line-height: 1.7;
-    margin: 60px 70px;
+    line-height: 1.75;
     color: #1a1a1a;
+    margin: 0;
+    padding: 0;
   }
-  h1 { font-size: 18pt; margin: 24px 0 12px; }
-  h2 { font-size: 14pt; margin: 24px 0 8px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
-  h3 { font-size: 12pt; margin: 18px 0 6px; }
-  p { margin: 8px 0; }
+  h1 {
+    font-size: 17pt;
+    margin: 0 0 14px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #1a1a1a;
+  }
+  h2 {
+    font-size: 13pt;
+    margin: 28px 0 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #ccc;
+  }
+  h3 {
+    font-size: 11pt;
+    font-weight: bold;
+    margin: 20px 0 4px;
+  }
+  p { margin: 6px 0 10px; }
   table {
     width: 100%;
     border-collapse: collapse;
-    margin: 16px 0;
+    margin: 16px 0 24px;
     font-size: 10pt;
+    page-break-inside: avoid;
   }
   td, th {
-    border: 1px solid #999;
-    padding: 8px 12px;
+    border: 1px solid #888;
+    padding: 8px 14px;
     vertical-align: top;
   }
-  hr { border: none; border-top: 2px solid #444; margin: 32px 0; }
-  a { color: #2563eb; }
-  ol { padding-left: 24px; }
-  li { margin: 4px 0; }
+  th { background: #f3f4f6; font-weight: 600; }
+  hr {
+    border: none;
+    border-top: 2px solid #333;
+    margin: 36px 0;
+  }
+  a { color: #1d4ed8; }
+  ol { padding-left: 22px; margin: 8px 0; }
+  li { margin: 5px 0; }
 </style>
 </head>
 <body>

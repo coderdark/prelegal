@@ -86,7 +86,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-const input = 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500';
+const input = 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500';
 
 export default function Home() {
   const [form, setForm] = useState<NdaFormData>(DEFAULT_FORM);

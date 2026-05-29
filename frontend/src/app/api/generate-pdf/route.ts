@@ -12,7 +12,11 @@ export async function POST(req: NextRequest) {
   const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: 'load' });
-  const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true });
+  const pdfBuffer = await page.pdf({
+    format: 'A4',
+    printBackground: true,
+    margin: { top: '25mm', bottom: '25mm', left: '20mm', right: '20mm' },
+  });
   await browser.close();
 
   return new Response(Buffer.from(pdfBuffer), {
