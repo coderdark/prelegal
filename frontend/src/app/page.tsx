@@ -1,11 +1,23 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useAuth } from '@/hooks/useAuth';
+import {
+  getChatGreeting,
+  sendChatMessage,
+  generatePdf,
+  listDocuments,
+  createDocument,
+  updateDocument,
+  getDocument,
+  deleteDocument,
+  type DocumentSummary,
+} from '@/lib/api';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
+// ── Types ────────────────────────────────────────────────────────────────────
 
 interface ChatMessage {
   role: 'assistant' | 'user';
@@ -13,6 +25,8 @@ interface ChatMessage {
 }
 
 type Fields = Record<string, string>;
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function fieldLabel(key: string): string {
   return key.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
@@ -91,8 +105,24 @@ const DOC_TYPE_NAMES: Record<string, string> = {
   ai_addendum: 'AI Addendum',
 };
 
+function relativeTime(isoString: string): string {
+  const diff = Date.now() - new Date(isoString).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function Home() {
   const router = useRouter();
+  const { email, loading: authLoading, signOut } = useAuth();
+
+  // Chat state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [fields, setFields] = useState<Fields>({});
   const [documentType, setDocumentType] = useState<string | null>(null);
@@ -100,19 +130,49 @@ export default function Home() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [downloading, setDownloading] = useState(false);
+
+  // Document persistence state
+  const [documentId, setDocumentId] = useState<number | null>(null);
+  const [documents, setDocuments] = useState<DocumentSummary[]>([]);
+  const [loadingDocs, setLoadingDocs] = useState(false);
+
+  // UI state
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activePane, setActivePane] = useState<'chat' | 'preview'>('chat');
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // ── Auth guard ──────────────────────────────────────────────────────────────
+
   useEffect(() => {
-    if (!localStorage.getItem('prelegal_user')) {
+    if (!authLoading && !email) {
       router.replace('/login');
-      return;
     }
-    fetch(`${API_BASE}/api/chat/greeting`)
-      .then((r) => r.json())
-      .then((data) => setMessages([{ role: 'assistant', content: data.message }]));
-  }, [router]);
+  }, [authLoading, email, router]);
+
+  // ── Initial data load ───────────────────────────────────────────────────────
+
+  const fetchDocuments = useCallback(async () => {
+    setLoadingDocs(true);
+    try {
+      const docs = await listDocuments();
+      setDocuments(docs);
+    } catch {
+      // silently ignore — user will just not see history
+    } finally {
+      setLoadingDocs(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!email) return;
+    getChatGreeting()
+      .then((data) => setMessages([{ role: 'assistant', content: data.message }]))
+      .catch(() => {});
+    fetchDocuments();
+  }, [email, fetchDocuments]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -122,29 +182,96 @@ export default function Home() {
     if (!sending) inputRef.current?.focus();
   }, [sending]);
 
+  // ── Document actions ────────────────────────────────────────────────────────
+
+  const startNewDocument = () => {
+    setMessages([]);
+    setFields({});
+    setDocumentType(null);
+    setComplete(false);
+    setDocumentId(null);
+    setSidebarOpen(false);
+    getChatGreeting()
+      .then((data) => setMessages([{ role: 'assistant', content: data.message }]))
+      .catch(() => {});
+  };
+
+  const loadDocument = async (doc: DocumentSummary) => {
+    try {
+      const detail = await getDocument(doc.id);
+      setMessages(detail.history as ChatMessage[]);
+      setFields(detail.fields);
+      setDocumentType(detail.document_type);
+      setComplete(detail.complete);
+      setDocumentId(detail.id);
+      setSidebarOpen(false);
+      setActivePane('chat');
+    } catch {
+      // ignore silently
+    }
+  };
+
+  const handleDeleteDocument = async (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDeletingId(id);
+    try {
+      await deleteDocument(id);
+      setDocuments((prev) => prev.filter((d) => d.id !== id));
+      if (documentId === id) startNewDocument();
+    } catch {
+      // ignore
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  // ── Send message ────────────────────────────────────────────────────────────
+
   const sendMessage = async () => {
     const text = input.trim();
     if (!text || sending) return;
 
     const userMsg: ChatMessage = { role: 'user', content: text };
-    setMessages((prev) => [...prev, userMsg]);
+    const updatedMessages = [...messages, userMsg];
+    setMessages(updatedMessages);
     setInput('');
     setSending(true);
 
     try {
-      const res = await fetch(`${API_BASE}/api/chat/message`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          history: messages.map((m) => ({ role: m.role, content: m.content })),
-          user_message: text,
-        }),
-      });
-      const data = await res.json();
-      setMessages((prev) => [...prev, { role: 'assistant', content: data.message }]);
+      const data = await sendChatMessage(
+        messages.map((m) => ({ role: m.role, content: m.content })),
+        text,
+      );
+
+      const aiMsg: ChatMessage = { role: 'assistant', content: data.message };
+      const fullHistory = [...updatedMessages, aiMsg];
+      setMessages(fullHistory);
       if (data.document_type) setDocumentType(data.document_type);
       setFields(data.fields ?? {});
       setComplete(data.complete ?? false);
+
+      // Auto-save document
+      const historyPayload = fullHistory.map((m) => ({ role: m.role, content: m.content }));
+      if (documentId === null) {
+        const created = await createDocument({
+          document_type: data.document_type ?? undefined,
+          fields: data.fields,
+          history: historyPayload,
+          complete: data.complete,
+        });
+        setDocumentId(created.id);
+        setDocuments((prev) => [{ id: created.id, title: created.title, document_type: created.document_type, updated_at: created.updated_at }, ...prev]);
+      } else {
+        const updated = await updateDocument(documentId, {
+          document_type: data.document_type ?? undefined,
+          fields: data.fields,
+          history: historyPayload,
+          complete: data.complete,
+        });
+        setDocuments((prev) =>
+          prev.map((d) => (d.id === documentId ? { ...d, title: updated.title, updated_at: updated.updated_at } : d)),
+        );
+      }
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -162,17 +289,13 @@ export default function Home() {
     }
   };
 
+  // ── PDF download ────────────────────────────────────────────────────────────
+
   const handleDownload = async () => {
     if (!documentType) return;
     setDownloading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/generate-pdf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ document_type: documentType, fields }),
-      });
-      if (!res.ok) throw new Error('PDF generation failed');
-      const blob = await res.blob();
+      const blob = await generatePdf(documentType, fields);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -186,6 +309,8 @@ export default function Home() {
     }
   };
 
+  // ── Derived ─────────────────────────────────────────────────────────────────
+
   const docName = documentType ? (DOC_TYPE_NAMES[documentType] ?? documentType) : null;
   const preview =
     documentType === 'mutual_nda'
@@ -193,38 +318,80 @@ export default function Home() {
       : buildGenericPreview(docName ?? 'Your Document', fields);
 
   const statusText = complete
-    ? '✓ All details gathered — download your document above.'
+    ? 'All details gathered — download your document above.'
     : documentType
     ? `Drafting your ${docName}…`
-    : 'Tell me what document you need and I\'ll help you draft it.';
+    : "Tell me what document you need and I'll help you draft it.";
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--background)' }}>
+        <p className="text-sm" style={{ color: 'rgba(203,213,225,0.6)' }}>Loading…</p>
+      </div>
+    );
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: 'var(--background)' }}>
+
       {/* Header */}
       <header
         className="border-b px-4 sm:px-6 py-4 flex items-center justify-between sticky top-0 z-10 backdrop-blur"
         style={{ background: 'var(--panel)', borderColor: 'var(--border)' }}
       >
-        <div>
-          <h1 className="text-lg sm:text-xl font-semibold tracking-tight" style={{ color: '#f1f5f9' }}>
-            {docName ?? 'Legal Document Creator'}
-          </h1>
-          <p className="text-xs mt-0.5" style={{ color: 'rgba(203,213,225,0.8)' }}>
-            Powered by Common Paper Standard Terms
-          </p>
-        </div>
-        {complete && (
+        <div className="flex items-center gap-3">
+          {/* Sidebar toggle */}
           <button
-            onClick={handleDownload}
-            disabled={downloading}
-            className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors cursor-pointer text-white disabled:opacity-50"
-            style={{ backgroundColor: '#753991' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#5e2d75')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#753991')}
+            type="button"
+            onClick={() => setSidebarOpen((o) => !o)}
+            className="p-1.5 rounded-lg transition-colors"
+            style={{ color: 'rgba(203,213,225,0.7)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.07)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+            title="Document history"
+            aria-label="Toggle document history"
           >
-            {downloading ? 'Generating…' : 'Download PDF'}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
           </button>
-        )}
+          <div>
+            <h1 className="text-lg sm:text-xl font-semibold tracking-tight" style={{ color: '#f1f5f9' }}>
+              {docName ?? 'Legal Document Creator'}
+            </h1>
+            <p className="text-xs mt-0.5" style={{ color: 'rgba(203,213,225,0.8)' }}>
+              Powered by Common Paper Standard Terms
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {complete && (
+            <button
+              onClick={handleDownload}
+              disabled={downloading}
+              className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors cursor-pointer text-white disabled:opacity-50"
+              style={{ backgroundColor: '#753991' }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#5e2d75')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#753991')}
+            >
+              {downloading ? 'Generating…' : 'Download PDF'}
+            </button>
+          )}
+          <button
+            onClick={signOut}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors cursor-pointer"
+            style={{ borderColor: 'rgba(226,232,240,0.2)', color: 'rgba(203,213,225,0.8)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.07)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+          >
+            Sign out
+          </button>
+        </div>
       </header>
 
       {/* Mobile pane switcher */}
@@ -247,11 +414,107 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Two-panel body */}
-      <div className="flex flex-1 md:overflow-hidden overflow-visible md:h-[calc(100vh-72px)] md:mt-0 mt-3">
+      {/* Main area */}
+      <div className="flex flex-1 md:overflow-hidden overflow-visible md:h-[calc(100vh-72px)] md:mt-0 mt-3 relative">
+
+        {/* Sidebar overlay (mobile) */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 z-20 md:hidden"
+            style={{ background: 'rgba(0,0,0,0.5)' }}
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+
+        {/* Document history sidebar */}
+        <aside
+          className={`
+            fixed md:static inset-y-0 left-0 z-30 md:z-auto
+            w-72 md:w-64 flex flex-col border-r
+            transform transition-transform duration-200 md:transform-none
+            ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+            ${sidebarOpen ? 'flex' : 'hidden md:flex'}
+          `}
+          style={{ background: 'var(--panel-solid)', borderColor: 'var(--border)' }}
+        >
+          <div className="px-4 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
+            <span className="text-sm font-semibold" style={{ color: '#f1f5f9' }}>My Documents</span>
+            <button
+              type="button"
+              onClick={startNewDocument}
+              className="text-xs font-semibold px-2.5 py-1 rounded-lg text-white"
+              style={{ backgroundColor: '#209dd7' }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#1a7fb0')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#209dd7')}
+            >
+              + New
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto py-2">
+            {loadingDocs && (
+              <p className="px-4 py-3 text-xs" style={{ color: 'rgba(203,213,225,0.5)' }}>Loading…</p>
+            )}
+            {!loadingDocs && documents.length === 0 && (
+              <p className="px-4 py-3 text-xs" style={{ color: 'rgba(203,213,225,0.5)' }}>
+                No documents yet. Start a conversation to create one.
+              </p>
+            )}
+            {documents.map((doc) => (
+              <div
+                key={doc.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => loadDocument(doc)}
+                onKeyDown={(e) => e.key === 'Enter' && loadDocument(doc)}
+                className="group flex items-start justify-between px-4 py-3 cursor-pointer transition-colors"
+                style={{
+                  background: documentId === doc.id ? 'rgba(32,157,215,0.15)' : 'transparent',
+                  borderLeft: documentId === doc.id ? '2px solid #209dd7' : '2px solid transparent',
+                }}
+                onMouseEnter={(e) => documentId !== doc.id && (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
+                onMouseLeave={(e) => documentId !== doc.id && (e.currentTarget.style.background = 'transparent')}
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium truncate" style={{ color: '#f1f5f9' }}>
+                    {doc.title}
+                  </p>
+                  <p className="text-xs mt-0.5" style={{ color: 'rgba(203,213,225,0.5)' }}>
+                    {relativeTime(doc.updated_at)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => handleDeleteDocument(doc.id, e)}
+                  disabled={deletingId === doc.id}
+                  className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded"
+                  style={{ color: 'rgba(203,213,225,0.5)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = '#f87171')}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(203,213,225,0.5)')}
+                  title="Delete document"
+                  aria-label="Delete document"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    <path d="M10 11v6M14 11v6" />
+                    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {email && (
+            <div className="px-4 py-3 border-t" style={{ borderColor: 'var(--border)' }}>
+              <p className="text-xs truncate" style={{ color: 'rgba(203,213,225,0.5)' }}>{email}</p>
+            </div>
+          )}
+        </aside>
+
         {/* Chat panel */}
         <div
-          className={`w-full md:w-1/2 flex flex-col md:border-r ${activePane === 'preview' ? 'hidden md:flex' : ''}`}
+          className={`w-full md:flex-1 flex flex-col md:border-r ${activePane === 'preview' ? 'hidden md:flex' : ''}`}
           style={{ borderColor: 'var(--border)' }}
         >
           <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-3">
