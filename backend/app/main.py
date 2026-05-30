@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-load_dotenv(Path(__file__).parent.parent.parent / ".env")
+load_dotenv()  # searches cwd upward; docker-compose passes vars via env_file
 
 from app.database import init_db
 from app.routes import auth, chat, pdf
