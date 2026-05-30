@@ -1,41 +1,50 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Mid-gray UI (between light and dark) */
+  --background: #334155; /* slate-700 */
+  --foreground: #f1f5f9; /* slate-100 */
+  --muted: rgba(226, 232, 240, 0.78); /* slate-200 */
+  --panel: rgba(30, 41, 59, 0.55); /* slate-800 w/ alpha */
+  --panel-solid: #1e293b; /* slate-800 */
+  --border: rgba(226, 232, 240, 0.14);
+  --card: rgba(15, 23, 42, 0.28); /* slate-900 w/ alpha */
+  --card-solid: #0f172a; /* slate-900 */
+  --input-bg: rgba(255, 255, 255, 0.08);
+  --input-fg: #f8fafc; /* slate-50 */
+  --input-placeholder: rgba(226, 232, 240, 0.62);
+  --input-border: rgba(226, 232, 240, 0.16);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial,
+    "Apple Color Emoji", "Segoe UI Emoji";
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* Note: intentionally not auto-switching themes via prefers-color-scheme.
+   If/when we add a theme toggle, we can re-introduce light tokens behind a class. */
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
 }
 
 /* Markdown preview prose styles */
-.nda-preview { color: #111827; }
-.nda-preview h1 { font-size: 1.25rem; font-weight: 700; margin: 1rem 0 0.5rem; color: #111827; }
-.nda-preview h2 { font-size: 1.1rem; font-weight: 700; margin: 1rem 0 0.4rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.25rem; color: #111827; }
-.nda-preview h3 { font-size: 1rem; font-weight: 600; margin: 0.75rem 0 0.3rem; color: #111827; }
-.nda-preview p { margin: 0.4rem 0; font-size: 0.875rem; line-height: 1.6; color: #111827; }
-.nda-preview hr { border: none; border-top: 1px solid #d1d5db; margin: 1rem 0; }
+.nda-preview { color: var(--foreground); }
+.nda-preview h1 { font-size: 1.25rem; font-weight: 700; margin: 1rem 0 0.5rem; color: var(--foreground); }
+.nda-preview h2 { font-size: 1.1rem; font-weight: 700; margin: 1rem 0 0.4rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem; color: var(--foreground); }
+.nda-preview h3 { font-size: 1rem; font-weight: 600; margin: 0.75rem 0 0.3rem; color: var(--foreground); }
+.nda-preview p { margin: 0.4rem 0; font-size: 0.875rem; line-height: 1.6; color: var(--foreground); }
+.nda-preview hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
 .nda-preview table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.8rem; }
-.nda-preview td, .nda-preview th { border: 1px solid #d1d5db; padding: 6px 10px; vertical-align: top; color: #111827; }
-.nda-preview a { color: #2563eb; text-decoration: underline; }
+.nda-preview td, .nda-preview th { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; color: var(--foreground); }
+.nda-preview a { color: #a5b4fc; text-decoration: underline; text-underline-offset: 2px; }
 .nda-preview ol { padding-left: 1.5rem; }
-.nda-preview li { font-size: 0.875rem; line-height: 1.6; margin: 0.2rem 0; color: #111827; }
-.nda-preview strong { font-weight: 600; color: #111827; }
-.nda-preview em { color: #374151; }
+.nda-preview li { font-size: 0.875rem; line-height: 1.6; margin: 0.2rem 0; color: var(--foreground); }
+.nda-preview strong { font-weight: 600; color: var(--foreground); }
+.nda-preview em { color: var(--muted); }

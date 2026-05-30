@@ -80,17 +80,21 @@ ${data.modifications || '_None._'}
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mb-4">
-      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      <label className="block text-sm font-medium text-slate-200 mb-1">{label}</label>
       {children}
     </div>
   );
 }
 
-const input = 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500';
+const input =
+  'w-full rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 py-2 text-sm text-[var(--input-fg)] placeholder:text-[color:var(--input-placeholder)] shadow-sm outline-none ring-1 ring-transparent focus:ring-2 focus:ring-indigo-500/25 focus:border-indigo-400/70';
+const inputCompact =
+  'rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 py-2 text-sm text-[var(--input-fg)] shadow-sm outline-none ring-1 ring-transparent focus:ring-2 focus:ring-indigo-500/25 focus:border-indigo-400/70';
 
 export default function Home() {
   const [form, setForm] = useState<NdaFormData>(DEFAULT_FORM);
   const [loading, setLoading] = useState(false);
+  const [activePane, setActivePane] = useState<'form' | 'preview'>('form');
 
   const set =
     (field: keyof NdaFormData) =>
@@ -123,138 +127,187 @@ export default function Home() {
   const preview = buildPreviewMarkdown(form);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen flex flex-col bg-[radial-gradient(1200px_circle_at_20%_-10%,rgba(99,102,241,0.16),transparent_60%),radial-gradient(900px_circle_at_90%_0%,rgba(56,189,248,0.10),transparent_55%)]">
       {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm">
+      <header className="bg-[var(--panel)] border-b border-[var(--border)] px-4 sm:px-6 py-4 flex items-center justify-between sticky top-0 z-10 backdrop-blur">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Mutual NDA Creator</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Powered by Common Paper Standard Terms v1.0</p>
+          <h1 className="text-lg sm:text-xl font-semibold text-slate-50 tracking-tight">Mutual NDA Creator</h1>
+          <p className="text-xs text-slate-300/80 mt-0.5">Powered by Common Paper Standard Terms v1.0</p>
         </div>
-        <button
-          onClick={handleDownload}
-          disabled={loading}
-          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-md transition-colors cursor-pointer"
-        >
-          {loading ? 'Generating…' : 'Download PDF'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleDownload}
+            disabled={loading}
+            className="bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer shadow-sm shadow-indigo-500/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/60"
+          >
+            {loading ? 'Generating…' : 'Download PDF'}
+          </button>
+        </div>
       </header>
 
+      {/* Mobile pane switcher */}
+      <div className="md:hidden px-4 sm:px-6 pt-4">
+        <div className="inline-flex rounded-xl bg-white/5 border border-white/10 p-1">
+          <button
+            type="button"
+            onClick={() => setActivePane('form')}
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              activePane === 'form' ? 'bg-white/10 text-slate-50' : 'text-slate-300 hover:text-slate-100'
+            }`}
+          >
+            Form
+          </button>
+          <button
+            type="button"
+            onClick={() => setActivePane('preview')}
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              activePane === 'preview' ? 'bg-white/10 text-slate-50' : 'text-slate-300 hover:text-slate-100'
+            }`}
+          >
+            Preview
+          </button>
+        </div>
+      </div>
+
       {/* Two-panel body */}
-      <div className="flex flex-1 overflow-hidden" style={{ height: 'calc(100vh - 65px)' }}>
+      <div className="flex flex-1 md:overflow-hidden overflow-visible md:h-[calc(100vh-72px)] md:mt-0 mt-3">
         {/* Form panel */}
-        <div className="w-1/2 overflow-y-auto p-6 border-r border-gray-200 bg-white">
-          <h2 className="text-base font-semibold text-gray-800 mb-5">Agreement Details</h2>
-
-          <Field label="Purpose">
-            <textarea rows={3} className={`${input} resize-none`} value={form.purpose} onChange={set('purpose')} />
-          </Field>
-
-          <Field label="Effective Date">
-            <input type="date" className={input} value={form.effectiveDate} onChange={set('effectiveDate')} />
-          </Field>
-
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">MNDA Term</label>
-            <div className="flex gap-2 items-center">
-              <select className={input} value={form.mndaTermType} onChange={set('mndaTermType')}>
-                <option value="fixed">Expires after</option>
-                <option value="until_terminated">Until terminated</option>
-              </select>
-              {form.mndaTermType === 'fixed' && (
-                <>
-                  <input
-                    type="number"
-                    min="1"
-                    className="w-20 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={form.mndaTermYears}
-                    onChange={set('mndaTermYears')}
-                  />
-                  <span className="text-sm text-gray-600 whitespace-nowrap">year(s)</span>
-                </>
-              )}
+        <div
+          className={`w-full md:w-1/2 overflow-y-auto px-4 sm:px-6 py-6 md:border-r md:border-[var(--border)] ${
+            activePane === 'preview' ? 'hidden md:block' : ''
+          }`}
+        >
+          <div className="bg-[var(--panel)] border border-[var(--border)] rounded-2xl p-5 sm:p-6 shadow-sm">
+            <div className="flex items-start justify-between gap-3 mb-5">
+              <div>
+                <h2 className="text-base font-semibold text-slate-50">Agreement Details</h2>
+                <p className="text-xs text-slate-300/80 mt-1">Fill the cover page fields; the Standard Terms stay unchanged.</p>
+              </div>
             </div>
-          </div>
 
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Term of Confidentiality</label>
-            <div className="flex gap-2 items-center">
-              <select className={input} value={form.confidentialityTermType} onChange={set('confidentialityTermType')}>
-                <option value="fixed">Fixed duration</option>
-                <option value="perpetuity">In perpetuity</option>
-              </select>
-              {form.confidentialityTermType === 'fixed' && (
-                <>
-                  <input
-                    type="number"
-                    min="1"
-                    className="w-20 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={form.confidentialityTermYears}
-                    onChange={set('confidentialityTermYears')}
-                  />
-                  <span className="text-sm text-gray-600 whitespace-nowrap">year(s)</span>
-                </>
-              )}
+            <Field label="Purpose">
+              <textarea rows={3} className={`${input} resize-none`} value={form.purpose} onChange={set('purpose')} />
+            </Field>
+
+            <Field label="Effective Date">
+              <input type="date" className={input} value={form.effectiveDate} onChange={set('effectiveDate')} />
+            </Field>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-200 mb-1">MNDA Term</label>
+              <div className="flex gap-2 items-center">
+                <select className={input} value={form.mndaTermType} onChange={set('mndaTermType')}>
+                  <option value="fixed">Expires after</option>
+                  <option value="until_terminated">Until terminated</option>
+                </select>
+                {form.mndaTermType === 'fixed' && (
+                  <>
+                    <input type="number" min="1" className={`w-20 ${inputCompact}`} value={form.mndaTermYears} onChange={set('mndaTermYears')} />
+                    <span className="text-sm text-slate-300 whitespace-nowrap">year(s)</span>
+                  </>
+                )}
+              </div>
             </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-200 mb-1">Term of Confidentiality</label>
+              <div className="flex gap-2 items-center">
+                <select className={input} value={form.confidentialityTermType} onChange={set('confidentialityTermType')}>
+                  <option value="fixed">Fixed duration</option>
+                  <option value="perpetuity">In perpetuity</option>
+                </select>
+                {form.confidentialityTermType === 'fixed' && (
+                  <>
+                    <input
+                      type="number"
+                      min="1"
+                      className={`w-20 ${inputCompact}`}
+                      value={form.confidentialityTermYears}
+                      onChange={set('confidentialityTermYears')}
+                    />
+                    <span className="text-sm text-slate-300 whitespace-nowrap">year(s)</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <Field label="Governing Law (State)">
+              <input type="text" className={input} placeholder="e.g. Delaware" value={form.governingLaw} onChange={set('governingLaw')} />
+            </Field>
+
+            <Field label="Jurisdiction">
+              <input
+                type="text"
+                className={input}
+                placeholder="e.g. courts located in New Castle, DE"
+                value={form.jurisdiction}
+                onChange={set('jurisdiction')}
+              />
+            </Field>
+
+            <Field label="MNDA Modifications (optional)">
+              <textarea
+                rows={2}
+                className={`${input} resize-none`}
+                placeholder="List any modifications, or leave blank for none."
+                value={form.modifications}
+                onChange={set('modifications')}
+              />
+            </Field>
+
+            <h2 className="text-base font-semibold text-slate-50 mt-7 mb-4">Party 1</h2>
+            <Field label="Print Name">
+              <input type="text" className={input} value={form.party1Name} onChange={set('party1Name')} />
+            </Field>
+            <Field label="Title">
+              <input type="text" className={input} value={form.party1Title} onChange={set('party1Title')} />
+            </Field>
+            <Field label="Company">
+              <input type="text" className={input} value={form.party1Company} onChange={set('party1Company')} />
+            </Field>
+            <Field label="Notice Address (email or postal)">
+              <input type="text" className={input} value={form.party1NoticeAddress} onChange={set('party1NoticeAddress')} />
+            </Field>
+
+            <h2 className="text-base font-semibold text-slate-50 mt-7 mb-4">Party 2</h2>
+            <Field label="Print Name">
+              <input type="text" className={input} value={form.party2Name} onChange={set('party2Name')} />
+            </Field>
+            <Field label="Title">
+              <input type="text" className={input} value={form.party2Title} onChange={set('party2Title')} />
+            </Field>
+            <Field label="Company">
+              <input type="text" className={input} value={form.party2Company} onChange={set('party2Company')} />
+            </Field>
+            <Field label="Notice Address (email or postal)">
+              <input type="text" className={input} value={form.party2NoticeAddress} onChange={set('party2NoticeAddress')} />
+            </Field>
           </div>
-
-          <Field label="Governing Law (State)">
-            <input type="text" className={input} placeholder="e.g. Delaware" value={form.governingLaw} onChange={set('governingLaw')} />
-          </Field>
-
-          <Field label="Jurisdiction">
-            <input
-              type="text"
-              className={input}
-              placeholder="e.g. courts located in New Castle, DE"
-              value={form.jurisdiction}
-              onChange={set('jurisdiction')}
-            />
-          </Field>
-
-          <Field label="MNDA Modifications (optional)">
-            <textarea
-              rows={2}
-              className={`${input} resize-none`}
-              placeholder="List any modifications, or leave blank for none."
-              value={form.modifications}
-              onChange={set('modifications')}
-            />
-          </Field>
-
-          <h2 className="text-base font-semibold text-gray-800 mt-6 mb-4">Party 1</h2>
-          <Field label="Print Name">
-            <input type="text" className={input} value={form.party1Name} onChange={set('party1Name')} />
-          </Field>
-          <Field label="Title">
-            <input type="text" className={input} value={form.party1Title} onChange={set('party1Title')} />
-          </Field>
-          <Field label="Company">
-            <input type="text" className={input} value={form.party1Company} onChange={set('party1Company')} />
-          </Field>
-          <Field label="Notice Address (email or postal)">
-            <input type="text" className={input} value={form.party1NoticeAddress} onChange={set('party1NoticeAddress')} />
-          </Field>
-
-          <h2 className="text-base font-semibold text-gray-800 mt-6 mb-4">Party 2</h2>
-          <Field label="Print Name">
-            <input type="text" className={input} value={form.party2Name} onChange={set('party2Name')} />
-          </Field>
-          <Field label="Title">
-            <input type="text" className={input} value={form.party2Title} onChange={set('party2Title')} />
-          </Field>
-          <Field label="Company">
-            <input type="text" className={input} value={form.party2Company} onChange={set('party2Company')} />
-          </Field>
-          <Field label="Notice Address (email or postal)">
-            <input type="text" className={input} value={form.party2NoticeAddress} onChange={set('party2NoticeAddress')} />
-          </Field>
         </div>
 
         {/* Preview panel */}
-        <div className="w-1/2 overflow-y-auto p-6 bg-gray-50">
-          <h2 className="text-base font-semibold text-gray-800 mb-4">Preview</h2>
-          <div className="bg-white rounded-lg border border-gray-200 p-8 nda-preview">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{preview}</ReactMarkdown>
+        <div
+          className={`w-full md:w-1/2 overflow-y-auto px-4 sm:px-6 py-6 ${
+            activePane === 'form' ? 'hidden md:block' : ''
+          }`}
+        >
+          <div className="bg-[var(--panel)] border border-[var(--border)] rounded-2xl p-5 sm:p-6 shadow-sm">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div>
+                <h2 className="text-base font-semibold text-slate-50">Preview</h2>
+                <p className="text-xs text-slate-300/80 mt-1">Placeholders show up until you fill each field.</p>
+              </div>
+              <button
+                type="button"
+                className="md:hidden text-xs text-slate-200/90 hover:text-slate-50 underline underline-offset-4"
+                onClick={() => setActivePane('form')}
+              >
+                Edit
+              </button>
+            </div>
+            <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-6 sm:p-8 nda-preview">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{preview}</ReactMarkdown>
+            </div>
           </div>
         </div>
       </div>
