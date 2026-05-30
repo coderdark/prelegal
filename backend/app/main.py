@@ -1,12 +1,15 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
+
 from app.database import init_db
-from app.routes import auth, pdf
+from app.routes import auth, chat, pdf
 
 app = FastAPI(title="Prelegal API")
 
@@ -18,6 +21,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(chat.router)
 app.include_router(pdf.router)
 
 

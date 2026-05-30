@@ -1,51 +1,61 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { NdaFormData } from '@/types/nda';
 
-const DEFAULT_FORM: NdaFormData = {
-  purpose: 'Evaluating whether to enter into a business relationship with the other party.',
-  effectiveDate: new Date().toISOString().split('T')[0],
-  mndaTermYears: '1',
-  mndaTermType: 'fixed',
-  confidentialityTermYears: '1',
-  confidentialityTermType: 'fixed',
-  governingLaw: '',
-  jurisdiction: '',
-  modifications: '',
-  party1Name: '',
-  party1Title: '',
-  party1Company: '',
-  party1NoticeAddress: '',
-  party2Name: '',
-  party2Title: '',
-  party2Company: '',
-  party2NoticeAddress: '',
-};
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
 
-function buildPreviewMarkdown(data: NdaFormData): string {
+interface NdaFields {
+  purpose?: string;
+  effectiveDate?: string;
+  mndaTermYears?: string;
+  mndaTermType?: string;
+  confidentialityTermYears?: string;
+  confidentialityTermType?: string;
+  governingLaw?: string;
+  jurisdiction?: string;
+  modifications?: string;
+  party1Name?: string;
+  party1Title?: string;
+  party1Company?: string;
+  party1NoticeAddress?: string;
+  party2Name?: string;
+  party2Title?: string;
+  party2Company?: string;
+  party2NoticeAddress?: string;
+}
+
+interface ChatMessage {
+  role: 'assistant' | 'user';
+  content: string;
+}
+
+function buildPreviewMarkdown(f: NdaFields): string {
   const mndaTerm =
-    data.mndaTermType === 'fixed'
-      ? `Expires ${data.mndaTermYears} year(s) from Effective Date.`
-      : 'Continues until terminated in accordance with the terms of the MNDA.';
+    f.mndaTermType === 'fixed'
+      ? `Expires ${f.mndaTermYears ?? '?'} year(s) from Effective Date.`
+      : f.mndaTermType === 'until_terminated'
+      ? 'Continues until terminated in accordance with the terms of the MNDA.'
+      : '_[not yet specified]_';
 
   const confidentialityTerm =
-    data.confidentialityTermType === 'fixed'
-      ? `${data.confidentialityTermYears} year(s) from Effective Date, but in the case of trade secrets until Confidential Information is no longer considered a trade secret under applicable laws.`
-      : 'In perpetuity.';
+    f.confidentialityTermType === 'fixed'
+      ? `${f.confidentialityTermYears ?? '?'} year(s) from Effective Date, but in the case of trade secrets until Confidential Information is no longer considered a trade secret under applicable laws.`
+      : f.confidentialityTermType === 'perpetuity'
+      ? 'In perpetuity.'
+      : '_[not yet specified]_';
 
   return `# Mutual Non-Disclosure Agreement
 
 This Mutual Non-Disclosure Agreement consists of this Cover Page and the Common Paper Mutual NDA Standard Terms Version 1.0.
 
 ### Purpose
-${data.purpose}
+${f.purpose || '_[not yet specified]_'}
 
 ### Effective Date
-${data.effectiveDate}
+${f.effectiveDate || '_[not yet specified]_'}
 
 ### MNDA Term
 ${mndaTerm}
@@ -55,12 +65,12 @@ ${confidentialityTerm}
 
 ### Governing Law & Jurisdiction
 
-**Governing Law:** ${data.governingLaw || '_[state]_'}
+**Governing Law:** ${f.governingLaw || '_[state]_'}
 
-**Jurisdiction:** ${data.jurisdiction || '_[city/county and state]_'}
+**Jurisdiction:** ${f.jurisdiction || '_[city/county and state]_'}
 
 ### MNDA Modifications
-${data.modifications || '_None._'}
+${f.modifications || '_None._'}
 
 ---
 
@@ -68,55 +78,111 @@ ${data.modifications || '_None._'}
 
 | | **Party 1** | **Party 2** |
 |:---|:---|:---|
-| Print Name | ${data.party1Name || '—'} | ${data.party2Name || '—'} |
-| Title | ${data.party1Title || '—'} | ${data.party2Title || '—'} |
-| Company | ${data.party1Company || '—'} | ${data.party2Company || '—'} |
-| Notice Address | ${data.party1NoticeAddress || '—'} | ${data.party2NoticeAddress || '—'} |
+| Print Name | ${f.party1Name || '—'} | ${f.party2Name || '—'} |
+| Title | ${f.party1Title || '—'} | ${f.party2Title || '—'} |
+| Company | ${f.party1Company || '—'} | ${f.party2Company || '—'} |
+| Notice Address | ${f.party1NoticeAddress || '—'} | ${f.party2NoticeAddress || '—'} |
 
 ---
 
 *The full Common Paper Mutual NDA Standard Terms (Version 1.0) will be included in the downloaded PDF.*`;
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="mb-4">
-      <label className="block text-sm font-medium text-slate-200 mb-1">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-const input =
-  'w-full rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 py-2 text-sm text-[var(--input-fg)] placeholder:text-[color:var(--input-placeholder)] shadow-sm outline-none ring-1 ring-transparent focus:ring-2 focus:ring-indigo-500/25 focus:border-indigo-400/70';
-const inputCompact =
-  'rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 py-2 text-sm text-[var(--input-fg)] shadow-sm outline-none ring-1 ring-transparent focus:ring-2 focus:ring-indigo-500/25 focus:border-indigo-400/70';
-
 export default function Home() {
   const router = useRouter();
-  const [form, setForm] = useState<NdaFormData>(DEFAULT_FORM);
-  const [loading, setLoading] = useState(false);
-  const [activePane, setActivePane] = useState<'form' | 'preview'>('form');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [fields, setFields] = useState<NdaFields>({});
+  const [complete, setComplete] = useState(false);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [activePane, setActivePane] = useState<'chat' | 'preview'>('chat');
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!localStorage.getItem('prelegal_user')) {
       router.replace('/login');
+      return;
     }
+    fetch(`${API_BASE}/api/chat/greeting`)
+      .then((r) => r.json())
+      .then((data) => setMessages([{ role: 'assistant', content: data.message }]));
   }, [router]);
 
-  const set =
-    (field: keyof NdaFormData) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
-      setForm((prev) => ({ ...prev, [field]: e.target.value }));
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
-  const handleDownload = async () => {
-    setLoading(true);
+  useEffect(() => {
+    if (!sending) inputRef.current?.focus();
+  }, [sending]);
+
+  const sendMessage = async () => {
+    const text = input.trim();
+    if (!text || sending) return;
+
+    const userMsg: ChatMessage = { role: 'user', content: text };
+    const updatedMessages = [...messages, userMsg];
+    setMessages(updatedMessages);
+    setInput('');
+    setSending(true);
+
     try {
-      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? '';
-      const res = await fetch(`${apiBase}/api/generate-pdf`, {
+      const res = await fetch(`${API_BASE}/api/chat/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          history: updatedMessages.map((m) => ({ role: m.role, content: m.content })),
+          user_message: text,
+        }),
+      });
+      const data = await res.json();
+      setMessages((prev) => [...prev, { role: 'assistant', content: data.message }]);
+      setFields(data.fields ?? {});
+      setComplete(data.complete ?? false);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: 'Sorry, something went wrong. Please try again.' },
+      ]);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/generate-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          purpose: fields.purpose ?? '',
+          effectiveDate: fields.effectiveDate ?? new Date().toISOString().split('T')[0],
+          mndaTermYears: fields.mndaTermYears ?? '1',
+          mndaTermType: fields.mndaTermType ?? 'fixed',
+          confidentialityTermYears: fields.confidentialityTermYears ?? '1',
+          confidentialityTermType: fields.confidentialityTermType ?? 'fixed',
+          governingLaw: fields.governingLaw ?? '',
+          jurisdiction: fields.jurisdiction ?? '',
+          modifications: fields.modifications ?? '',
+          party1Name: fields.party1Name ?? '',
+          party1Title: fields.party1Title ?? '',
+          party1Company: fields.party1Company ?? '',
+          party1NoticeAddress: fields.party1NoticeAddress ?? '',
+          party2Name: fields.party2Name ?? '',
+          party2Title: fields.party2Title ?? '',
+          party2Company: fields.party2Company ?? '',
+          party2NoticeAddress: fields.party2NoticeAddress ?? '',
+        }),
       });
       if (!res.ok) throw new Error('PDF generation failed');
       const blob = await res.blob();
@@ -129,192 +195,157 @@ export default function Home() {
     } catch {
       alert('Failed to generate PDF. Please try again.');
     } finally {
-      setLoading(false);
+      setDownloading(false);
     }
   };
 
-  const preview = buildPreviewMarkdown(form);
+  const preview = buildPreviewMarkdown(fields);
 
   return (
-    <div className="min-h-screen flex flex-col bg-[radial-gradient(1200px_circle_at_20%_-10%,rgba(99,102,241,0.16),transparent_60%),radial-gradient(900px_circle_at_90%_0%,rgba(56,189,248,0.10),transparent_55%)]">
+    <div className="min-h-screen flex flex-col" style={{ background: 'var(--background)' }}>
       {/* Header */}
-      <header className="bg-[var(--panel)] border-b border-[var(--border)] px-4 sm:px-6 py-4 flex items-center justify-between sticky top-0 z-10 backdrop-blur">
+      <header
+        className="border-b px-4 sm:px-6 py-4 flex items-center justify-between sticky top-0 z-10 backdrop-blur"
+        style={{ background: 'var(--panel)', borderColor: 'var(--border)' }}
+      >
         <div>
-          <h1 className="text-lg sm:text-xl font-semibold text-slate-50 tracking-tight">Mutual NDA Creator</h1>
-          <p className="text-xs text-slate-300/80 mt-0.5">Powered by Common Paper Standard Terms v1.0</p>
+          <h1 className="text-lg sm:text-xl font-semibold tracking-tight" style={{ color: '#f1f5f9' }}>
+            Mutual NDA Creator
+          </h1>
+          <p className="text-xs mt-0.5" style={{ color: 'rgba(203,213,225,0.8)' }}>
+            Powered by Common Paper Standard Terms v1.0
+          </p>
         </div>
-        <div className="flex items-center gap-2">
+        {complete && (
           <button
             onClick={handleDownload}
-            disabled={loading}
-            className="bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer shadow-sm shadow-indigo-500/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/60"
+            disabled={downloading}
+            className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors cursor-pointer text-white disabled:opacity-50"
+            style={{ backgroundColor: '#753991' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#5e2d75')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#753991')}
           >
-            {loading ? 'Generating…' : 'Download PDF'}
+            {downloading ? 'Generating…' : 'Download PDF'}
           </button>
-        </div>
+        )}
       </header>
 
       {/* Mobile pane switcher */}
       <div className="md:hidden px-4 sm:px-6 pt-4">
-        <div className="inline-flex rounded-xl bg-white/5 border border-white/10 p-1">
-          <button
-            type="button"
-            onClick={() => setActivePane('form')}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-              activePane === 'form' ? 'bg-white/10 text-slate-50' : 'text-slate-300 hover:text-slate-100'
-            }`}
-          >
-            Form
-          </button>
-          <button
-            type="button"
-            onClick={() => setActivePane('preview')}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-              activePane === 'preview' ? 'bg-white/10 text-slate-50' : 'text-slate-300 hover:text-slate-100'
-            }`}
-          >
-            Preview
-          </button>
+        <div className="inline-flex rounded-xl p-1" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.10)' }}>
+          {(['chat', 'preview'] as const).map((pane) => (
+            <button
+              key={pane}
+              type="button"
+              onClick={() => setActivePane(pane)}
+              className="px-3 py-1.5 text-sm rounded-lg transition-colors capitalize"
+              style={{
+                background: activePane === pane ? 'rgba(255,255,255,0.10)' : 'transparent',
+                color: activePane === pane ? '#f8fafc' : 'rgba(203,213,225,0.8)',
+              }}
+            >
+              {pane}
+            </button>
+          ))}
         </div>
       </div>
 
       {/* Two-panel body */}
       <div className="flex flex-1 md:overflow-hidden overflow-visible md:h-[calc(100vh-72px)] md:mt-0 mt-3">
-        {/* Form panel */}
+        {/* Chat panel */}
         <div
-          className={`w-full md:w-1/2 overflow-y-auto px-4 sm:px-6 py-6 md:border-r md:border-[var(--border)] ${
-            activePane === 'preview' ? 'hidden md:block' : ''
-          }`}
+          className={`w-full md:w-1/2 flex flex-col md:border-r ${activePane === 'preview' ? 'hidden md:flex' : ''}`}
+          style={{ borderColor: 'var(--border)' }}
         >
-          <div className="bg-[var(--panel)] border border-[var(--border)] rounded-2xl p-5 sm:p-6 shadow-sm">
-            <div className="flex items-start justify-between gap-3 mb-5">
-              <div>
-                <h2 className="text-base font-semibold text-slate-50">Agreement Details</h2>
-                <p className="text-xs text-slate-300/80 mt-1">Fill the cover page fields; the Standard Terms stay unchanged.</p>
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-3">
+            {messages.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div
+                  className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed"
+                  style={
+                    msg.role === 'user'
+                      ? { backgroundColor: '#209dd7', color: '#fff' }
+                      : { background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--foreground)' }
+                  }
+                >
+                  {msg.content}
+                </div>
               </div>
-            </div>
-
-            <Field label="Purpose">
-              <textarea rows={3} className={`${input} resize-none`} value={form.purpose} onChange={set('purpose')} />
-            </Field>
-
-            <Field label="Effective Date">
-              <input type="date" className={input} value={form.effectiveDate} onChange={set('effectiveDate')} />
-            </Field>
-
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-slate-200 mb-1">MNDA Term</label>
-              <div className="flex gap-2 items-center">
-                <select className={input} value={form.mndaTermType} onChange={set('mndaTermType')}>
-                  <option value="fixed">Expires after</option>
-                  <option value="until_terminated">Until terminated</option>
-                </select>
-                {form.mndaTermType === 'fixed' && (
-                  <>
-                    <input type="number" min="1" className={`w-20 ${inputCompact}`} value={form.mndaTermYears} onChange={set('mndaTermYears')} />
-                    <span className="text-sm text-slate-300 whitespace-nowrap">year(s)</span>
-                  </>
-                )}
+            ))}
+            {sending && (
+              <div className="flex justify-start">
+                <div
+                  className="rounded-2xl px-4 py-2.5 text-sm"
+                  style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'rgba(203,213,225,0.7)' }}
+                >
+                  Thinking…
+                </div>
               </div>
-            </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
 
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-slate-200 mb-1">Term of Confidentiality</label>
-              <div className="flex gap-2 items-center">
-                <select className={input} value={form.confidentialityTermType} onChange={set('confidentialityTermType')}>
-                  <option value="fixed">Fixed duration</option>
-                  <option value="perpetuity">In perpetuity</option>
-                </select>
-                {form.confidentialityTermType === 'fixed' && (
-                  <>
-                    <input
-                      type="number"
-                      min="1"
-                      className={`w-20 ${inputCompact}`}
-                      value={form.confidentialityTermYears}
-                      onChange={set('confidentialityTermYears')}
-                    />
-                    <span className="text-sm text-slate-300 whitespace-nowrap">year(s)</span>
-                  </>
-                )}
-              </div>
-            </div>
-
-            <Field label="Governing Law (State)">
-              <input type="text" className={input} placeholder="e.g. Delaware" value={form.governingLaw} onChange={set('governingLaw')} />
-            </Field>
-
-            <Field label="Jurisdiction">
-              <input
-                type="text"
-                className={input}
-                placeholder="e.g. courts located in New Castle, DE"
-                value={form.jurisdiction}
-                onChange={set('jurisdiction')}
-              />
-            </Field>
-
-            <Field label="MNDA Modifications (optional)">
+          {/* Input */}
+          <div className="px-4 sm:px-6 py-4 border-t" style={{ borderColor: 'var(--border)' }}>
+            <div
+              className="flex items-end gap-2 rounded-xl p-2"
+              style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
+            >
               <textarea
-                rows={2}
-                className={`${input} resize-none`}
-                placeholder="List any modifications, or leave blank for none."
-                value={form.modifications}
-                onChange={set('modifications')}
+                ref={inputRef}
+                rows={1}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
+                disabled={sending}
+                className="flex-1 resize-none bg-transparent text-sm outline-none px-2 py-1.5 max-h-32"
+                style={{ color: 'var(--input-fg)' }}
               />
-            </Field>
-
-            <h2 className="text-base font-semibold text-slate-50 mt-7 mb-4">Party 1</h2>
-            <Field label="Print Name">
-              <input type="text" className={input} value={form.party1Name} onChange={set('party1Name')} />
-            </Field>
-            <Field label="Title">
-              <input type="text" className={input} value={form.party1Title} onChange={set('party1Title')} />
-            </Field>
-            <Field label="Company">
-              <input type="text" className={input} value={form.party1Company} onChange={set('party1Company')} />
-            </Field>
-            <Field label="Notice Address (email or postal)">
-              <input type="text" className={input} value={form.party1NoticeAddress} onChange={set('party1NoticeAddress')} />
-            </Field>
-
-            <h2 className="text-base font-semibold text-slate-50 mt-7 mb-4">Party 2</h2>
-            <Field label="Print Name">
-              <input type="text" className={input} value={form.party2Name} onChange={set('party2Name')} />
-            </Field>
-            <Field label="Title">
-              <input type="text" className={input} value={form.party2Title} onChange={set('party2Title')} />
-            </Field>
-            <Field label="Company">
-              <input type="text" className={input} value={form.party2Company} onChange={set('party2Company')} />
-            </Field>
-            <Field label="Notice Address (email or postal)">
-              <input type="text" className={input} value={form.party2NoticeAddress} onChange={set('party2NoticeAddress')} />
-            </Field>
+              <button
+                onClick={sendMessage}
+                disabled={sending || !input.trim()}
+                className="shrink-0 px-3 py-1.5 rounded-lg text-sm font-semibold text-white transition-colors disabled:opacity-40 cursor-pointer"
+                style={{ backgroundColor: '#753991' }}
+                onMouseEnter={(e) => !sending && input.trim() && (e.currentTarget.style.backgroundColor = '#5e2d75')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#753991')}
+              >
+                Send
+              </button>
+            </div>
+            <p className="text-xs mt-1.5 text-center" style={{ color: 'rgba(203,213,225,0.5)' }}>
+              {complete ? '✓ All fields gathered — download your PDF above.' : 'Tell the AI about your NDA and it will fill in the details.'}
+            </p>
           </div>
         </div>
 
         {/* Preview panel */}
         <div
-          className={`w-full md:w-1/2 overflow-y-auto px-4 sm:px-6 py-6 ${
-            activePane === 'form' ? 'hidden md:block' : ''
-          }`}
+          className={`w-full md:w-1/2 overflow-y-auto px-4 sm:px-6 py-6 ${activePane === 'chat' ? 'hidden md:block' : ''}`}
         >
-          <div className="bg-[var(--panel)] border border-[var(--border)] rounded-2xl p-5 sm:p-6 shadow-sm">
+          <div
+            className="rounded-2xl p-5 sm:p-6 shadow-sm"
+            style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
+          >
             <div className="flex items-center justify-between gap-3 mb-4">
               <div>
-                <h2 className="text-base font-semibold text-slate-50">Preview</h2>
-                <p className="text-xs text-slate-300/80 mt-1">Placeholders show up until you fill each field.</p>
+                <h2 className="text-base font-semibold" style={{ color: '#f1f5f9' }}>Preview</h2>
+                <p className="text-xs mt-1" style={{ color: 'rgba(203,213,225,0.8)' }}>Updates as the AI gathers information.</p>
               </div>
               <button
                 type="button"
-                className="md:hidden text-xs text-slate-200/90 hover:text-slate-50 underline underline-offset-4"
-                onClick={() => setActivePane('form')}
+                className="md:hidden text-xs underline underline-offset-4"
+                style={{ color: 'rgba(203,213,225,0.9)' }}
+                onClick={() => setActivePane('chat')}
               >
-                Edit
+                Chat
               </button>
             </div>
-            <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-6 sm:p-8 nda-preview">
+            <div
+              className="rounded-xl p-6 sm:p-8 nda-preview"
+              style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+            >
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{preview}</ReactMarkdown>
             </div>
           </div>
