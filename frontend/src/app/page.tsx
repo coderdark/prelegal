@@ -7,32 +7,18 @@ import remarkGfm from 'remark-gfm';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
 
-interface NdaFields {
-  purpose?: string;
-  effectiveDate?: string;
-  mndaTermYears?: string;
-  mndaTermType?: string;
-  confidentialityTermYears?: string;
-  confidentialityTermType?: string;
-  governingLaw?: string;
-  jurisdiction?: string;
-  modifications?: string;
-  party1Name?: string;
-  party1Title?: string;
-  party1Company?: string;
-  party1NoticeAddress?: string;
-  party2Name?: string;
-  party2Title?: string;
-  party2Company?: string;
-  party2NoticeAddress?: string;
-}
-
 interface ChatMessage {
   role: 'assistant' | 'user';
   content: string;
 }
 
-function buildPreviewMarkdown(f: NdaFields): string {
+type Fields = Record<string, string>;
+
+function fieldLabel(key: string): string {
+  return key.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
+}
+
+function buildNdaPreview(f: Fields): string {
   const mndaTerm =
     f.mndaTermType === 'fixed'
       ? `Expires ${f.mndaTermYears ?? '?'} year(s) from Effective Date.`
@@ -48,8 +34,6 @@ function buildPreviewMarkdown(f: NdaFields): string {
       : '_[not yet specified]_';
 
   return `# Mutual Non-Disclosure Agreement
-
-This Mutual Non-Disclosure Agreement consists of this Cover Page and the Common Paper Mutual NDA Standard Terms Version 1.0.
 
 ### Purpose
 ${f.purpose || '_[not yet specified]_'}
@@ -83,15 +67,35 @@ ${f.modifications || '_None._'}
 | Company | ${f.party1Company || '—'} | ${f.party2Company || '—'} |
 | Notice Address | ${f.party1NoticeAddress || '—'} | ${f.party2NoticeAddress || '—'} |
 
----
-
 *The full Common Paper Mutual NDA Standard Terms (Version 1.0) will be included in the downloaded PDF.*`;
 }
+
+function buildGenericPreview(docTypeName: string, f: Fields): string {
+  const entries = Object.entries(f).filter(([, v]) => v);
+  if (entries.length === 0) return `# ${docTypeName}\n\n_Details will appear here as the AI gathers information._`;
+  const rows = entries.map(([k, v]) => `| ${fieldLabel(k)} | ${v} |`).join('\n');
+  return `# ${docTypeName}\n\n### Gathered Details\n\n| Field | Value |\n|:------|:------|\n${rows}`;
+}
+
+const DOC_TYPE_NAMES: Record<string, string> = {
+  mutual_nda: 'Mutual Non-Disclosure Agreement',
+  csa: 'Cloud Service Agreement',
+  design_partner: 'Design Partner Agreement',
+  sla: 'Service Level Agreement',
+  psa: 'Professional Services Agreement',
+  dpa: 'Data Processing Agreement',
+  software_license: 'Software License Agreement',
+  partnership: 'Partnership Agreement',
+  pilot: 'Pilot Agreement',
+  baa: 'Business Associate Agreement',
+  ai_addendum: 'AI Addendum',
+};
 
 export default function Home() {
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [fields, setFields] = useState<NdaFields>({});
+  const [fields, setFields] = useState<Fields>({});
+  const [documentType, setDocumentType] = useState<string | null>(null);
   const [complete, setComplete] = useState(false);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -123,8 +127,7 @@ export default function Home() {
     if (!text || sending) return;
 
     const userMsg: ChatMessage = { role: 'user', content: text };
-    const updatedMessages = [...messages, userMsg];
-    setMessages(updatedMessages);
+    setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setSending(true);
 
@@ -139,6 +142,7 @@ export default function Home() {
       });
       const data = await res.json();
       setMessages((prev) => [...prev, { role: 'assistant', content: data.message }]);
+      if (data.document_type) setDocumentType(data.document_type);
       setFields(data.fields ?? {});
       setComplete(data.complete ?? false);
     } catch {
@@ -159,37 +163,20 @@ export default function Home() {
   };
 
   const handleDownload = async () => {
+    if (!documentType) return;
     setDownloading(true);
     try {
       const res = await fetch(`${API_BASE}/api/generate-pdf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          purpose: fields.purpose ?? '',
-          effectiveDate: fields.effectiveDate ?? new Date().toISOString().split('T')[0],
-          mndaTermYears: fields.mndaTermYears ?? '1',
-          mndaTermType: fields.mndaTermType ?? 'fixed',
-          confidentialityTermYears: fields.confidentialityTermYears ?? '1',
-          confidentialityTermType: fields.confidentialityTermType ?? 'fixed',
-          governingLaw: fields.governingLaw ?? '',
-          jurisdiction: fields.jurisdiction ?? '',
-          modifications: fields.modifications ?? '',
-          party1Name: fields.party1Name ?? '',
-          party1Title: fields.party1Title ?? '',
-          party1Company: fields.party1Company ?? '',
-          party1NoticeAddress: fields.party1NoticeAddress ?? '',
-          party2Name: fields.party2Name ?? '',
-          party2Title: fields.party2Title ?? '',
-          party2Company: fields.party2Company ?? '',
-          party2NoticeAddress: fields.party2NoticeAddress ?? '',
-        }),
+        body: JSON.stringify({ document_type: documentType, fields }),
       });
       if (!res.ok) throw new Error('PDF generation failed');
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'Mutual-NDA.pdf';
+      a.download = `${DOC_TYPE_NAMES[documentType] ?? documentType}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
     } catch {
@@ -199,7 +186,17 @@ export default function Home() {
     }
   };
 
-  const preview = buildPreviewMarkdown(fields);
+  const docName = documentType ? (DOC_TYPE_NAMES[documentType] ?? documentType) : null;
+  const preview =
+    documentType === 'mutual_nda'
+      ? buildNdaPreview(fields)
+      : buildGenericPreview(docName ?? 'Your Document', fields);
+
+  const statusText = complete
+    ? '✓ All details gathered — download your document above.'
+    : documentType
+    ? `Drafting your ${docName}…`
+    : 'Tell me what document you need and I\'ll help you draft it.';
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: 'var(--background)' }}>
@@ -210,10 +207,10 @@ export default function Home() {
       >
         <div>
           <h1 className="text-lg sm:text-xl font-semibold tracking-tight" style={{ color: '#f1f5f9' }}>
-            Mutual NDA Creator
+            {docName ?? 'Legal Document Creator'}
           </h1>
           <p className="text-xs mt-0.5" style={{ color: 'rgba(203,213,225,0.8)' }}>
-            Powered by Common Paper Standard Terms v1.0
+            Powered by Common Paper Standard Terms
           </p>
         </div>
         {complete && (
@@ -257,7 +254,6 @@ export default function Home() {
           className={`w-full md:w-1/2 flex flex-col md:border-r ${activePane === 'preview' ? 'hidden md:flex' : ''}`}
           style={{ borderColor: 'var(--border)' }}
         >
-          {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-3">
             {messages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -286,7 +282,6 @@ export default function Home() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input */}
           <div className="px-4 sm:px-6 py-4 border-t" style={{ borderColor: 'var(--border)' }}>
             <div
               className="flex items-end gap-2 rounded-xl p-2"
@@ -315,7 +310,7 @@ export default function Home() {
               </button>
             </div>
             <p className="text-xs mt-1.5 text-center" style={{ color: 'rgba(203,213,225,0.5)' }}>
-              {complete ? '✓ All fields gathered — download your PDF above.' : 'Tell the AI about your NDA and it will fill in the details.'}
+              {statusText}
             </p>
           </div>
         </div>

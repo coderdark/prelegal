@@ -5,82 +5,57 @@ from fastapi import APIRouter
 from litellm import completion
 from pydantic import BaseModel
 
+from app.document_catalog import CATALOG, is_complete
+
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 MODEL = "openrouter/openai/gpt-oss-120b"
 EXTRA_BODY = {"provider": {"order": ["cerebras"]}}
 
-SYSTEM_PROMPT = """You are a friendly legal assistant helping users draft a Mutual Non-Disclosure Agreement (Mutual NDA).
+_SUPPORTED_DOCS = "\n".join(
+    f"- {doc.key}: {doc.name}" for doc in CATALOG.values()
+)
 
-Your job is to gather the following information through natural conversation:
-- Purpose of the NDA (why the parties are sharing confidential information)
-- Effective date
-- MNDA term (either a fixed number of years, or "until terminated")
-- Term of confidentiality (either a fixed number of years, or "in perpetuity")
-- Governing law (which US state's laws apply)
-- Jurisdiction (which courts have jurisdiction)
-- Any modifications to the standard terms (optional)
-- Party 1: name, title, company, notice address (email or postal)
-- Party 2: name, title, company, notice address (email or postal)
+_FIELD_HINTS = "\n".join(
+    f"- {doc.key} ({doc.name}): {doc.field_hints}" for doc in CATALOG.values()
+)
 
-Guidelines:
-- Be warm and conversational. Ask for a few related pieces of info at a time, not one by one.
-- When you have gathered a piece of information, include it in the extracted fields — even partial info is fine.
-- If the user provides info unprompted, extract it and move on.
-- When all required fields are filled, confirm with the user and let them know they can download the PDF.
-- Required fields: purpose, effectiveDate, mndaTermType, confidentialityTermType, governingLaw, jurisdiction, party1Name, party1Title, party1Company, party1NoticeAddress, party2Name, party2Title, party2Company, party2NoticeAddress.
-- mndaTermYears is only required when mndaTermType is "fixed". Same for confidentialityTermYears.
-- Today's date for reference: use ISO format (YYYY-MM-DD) for effectiveDate.
-- For mndaTermType use exactly: "fixed" or "until_terminated".
-- For confidentialityTermType use exactly: "fixed" or "perpetuity".
-- Keep your replies concise — 1-3 sentences plus a question."""
+SYSTEM_PROMPT = f"""You are a friendly legal assistant helping users draft legal agreements using Common Paper standard templates.
 
-GREETING = "Hi! I'm here to help you draft a Mutual Non-Disclosure Agreement. Let's start — who are the two parties involved, and what's the general purpose of the NDA?"
+Supported document types:
+{_SUPPORTED_DOCS}
 
+Your workflow:
+1. Start by asking what kind of document the user needs (if not already clear).
+2. If the user asks for a document NOT in the supported list, explain you cannot generate it and suggest the closest supported type.
+3. Once the document type is identified, set document_type to the correct key and begin gathering information.
+4. Gather information conversationally — ask for a few related pieces at a time.
+5. When all required fields are collected, set complete: true and confirm the user can download.
 
-class NdaFields(BaseModel):
-    purpose: Optional[str] = None
-    effectiveDate: Optional[str] = None
-    mndaTermYears: Optional[str] = None
-    mndaTermType: Optional[str] = None
-    confidentialityTermYears: Optional[str] = None
-    confidentialityTermType: Optional[str] = None
-    governingLaw: Optional[str] = None
-    jurisdiction: Optional[str] = None
-    modifications: Optional[str] = None
-    party1Name: Optional[str] = None
-    party1Title: Optional[str] = None
-    party1Company: Optional[str] = None
-    party1NoticeAddress: Optional[str] = None
-    party2Name: Optional[str] = None
-    party2Title: Optional[str] = None
-    party2Company: Optional[str] = None
-    party2NoticeAddress: Optional[str] = None
+Fields to gather per document type:
+{_FIELD_HINTS}
+
+Rules for fields dict:
+- Use the exact camelCase field names listed above.
+- Only include fields that have been confirmed by the user — do not guess.
+- Carry forward all previously confirmed fields on every response.
+- For mutual_nda: mndaTermType must be exactly "fixed" or "until_terminated"; confidentialityTermType must be exactly "fixed" or "perpetuity".
+
+Keep replies warm and concise: 2–3 sentences plus a question. Today's date (ISO format) is available for effective date references."""
+
+GREETING = "Hi! I'm here to help you draft a legal agreement. What kind of document do you need — for example, an NDA, a Cloud Service Agreement, a Pilot Agreement, or something else?"
 
 
 class ChatResponse(BaseModel):
     message: str
-    fields: NdaFields
-    complete: bool
+    document_type: Optional[str] = None
+    fields: dict[str, str] = {}
+    complete: bool = False
 
 
 class MessageRequest(BaseModel):
     history: list[dict]
     user_message: str
-
-
-def _is_complete(fields: NdaFields) -> bool:
-    required = [
-        fields.purpose, fields.effectiveDate, fields.mndaTermType,
-        fields.confidentialityTermType, fields.governingLaw, fields.jurisdiction,
-        fields.party1Name, fields.party1Title, fields.party1Company, fields.party1NoticeAddress,
-        fields.party2Name, fields.party2Title, fields.party2Company, fields.party2NoticeAddress,
-    ]
-    if fields.mndaTermType == "fixed" and not fields.mndaTermYears:
-        return False
-    if fields.confidentialityTermType == "fixed" and not fields.confidentialityTermYears:
-        return False
-    return all(f for f in required)
 
 
 @router.get("/greeting")
@@ -106,5 +81,6 @@ async def message(req: MessageRequest):
     )
 
     result = ChatResponse.model_validate_json(response.choices[0].message.content)
-    result.complete = _is_complete(result.fields)
+    if result.document_type:
+        result.complete = is_complete(result.document_type, result.fields)
     return result
