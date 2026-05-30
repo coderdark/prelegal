@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { NdaFormData } from '@/types/nda';
@@ -92,9 +93,16 @@ const inputCompact =
   'rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 py-2 text-sm text-[var(--input-fg)] shadow-sm outline-none ring-1 ring-transparent focus:ring-2 focus:ring-indigo-500/25 focus:border-indigo-400/70';
 
 export default function Home() {
+  const router = useRouter();
   const [form, setForm] = useState<NdaFormData>(DEFAULT_FORM);
   const [loading, setLoading] = useState(false);
   const [activePane, setActivePane] = useState<'form' | 'preview'>('form');
+
+  useEffect(() => {
+    if (!localStorage.getItem('prelegal_user')) {
+      router.replace('/login');
+    }
+  }, [router]);
 
   const set =
     (field: keyof NdaFormData) =>
@@ -104,7 +112,8 @@ export default function Home() {
   const handleDownload = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/generate-pdf', {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? '';
+      const res = await fetch(`${apiBase}/api/generate-pdf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
