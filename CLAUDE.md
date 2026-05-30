@@ -8,7 +8,7 @@ The available documents are covered in the catalog.json file in the project root
 
 @catalog.json
 
-The current implementation supports all 11 document types via AI chat with full user authentication and document persistence.
+The current implementation is a freeform AI chat that helps users draft a Mutual NDA, served from a FastAPI backend inside Docker. The AI extracts NDA fields conversationally and the preview updates live. Full document type support and real authentication are planned for upcoming sprints.
 
 ## Development process
 
@@ -57,49 +57,35 @@ Backend available at http://localhost:8000
 ## Implementation Status
 
 ### Completed (PL-4)
-- Docker multi-stage build (Node frontend + Python backend)
-- FastAPI backend with SQLite (fresh DB each container start)
-- Next.js static export served by FastAPI at localhost:8000
-- Auth routes: POST /api/auth/signup, POST /api/auth/signin, POST /api/auth/signout, GET /api/auth/me
-- Start/stop scripts for Mac, Linux, Windows
-- Mutual NDA form with live preview and PDF download
+- Docker multi-stage build: Node.js stage builds Next.js static export, Python stage runs FastAPI
+- FastAPI backend (`backend/`) as a `uv` project; SQLite DB created fresh on each container start with a `users` table
+- Next.js static export (`frontend/out/`) served by FastAPI at http://localhost:8000
+- Stub auth routes (no real validation — fake login for now): signup, signin, signout, me
+- Fake login screen at `/login`: localStorage-based session flag, unauthenticated users are redirected
+- Mutual NDA form with live preview and PDF download (PDF generated server-side via WeasyPrint in FastAPI)
+- Start/stop scripts for Mac, Linux, and Windows in `scripts/`
 
 ### Completed (PL-5)
-- AI chat interface replaces manual form for NDA creation
-- Uses LiteLLM via OpenRouter with Cerebras inference (gpt-oss-120b model)
-- Structured outputs for reliable field extraction from conversation
-- Live preview updates as AI extracts fields from chat
-- AI greets user, asks questions conversationally, and confirms when complete
-- Download button appears when all required fields are gathered
-
-### Completed (PL-6)
-- Support for all 11 document types from catalog.json
-- AI detects document type from user requests and routes accordingly
-- Dedicated preview/PDF components for Mutual NDA, Cloud Service Agreement, Pilot Agreement
-- Generic preview/PDF components for remaining document types (Design Partner, SLA, Professional Services, Partnership, Software License, DPA, BAA, AI Addendum)
-- Auto-focus chat input after sending messages
-- AI always asks follow-on questions when more information is needed
-
-### Completed (PL-7)
-- Functional user authentication with JWT tokens in HttpOnly cookies
-- User signup and signin with email/password (bcrypt password hashing)
-- Document persistence - users can save documents to their account
-- My Documents modal to view, load, and delete saved documents
-- User menu with sign out functionality
-- New Document button to start fresh
-- Auth context for managing user state across the app
-- Protected document save/load endpoints
+- AI chat replaces the manual NDA form; the left panel is now a freeform chat UI
+- Backend: `GET /api/chat/greeting` returns the opening message; `POST /api/chat/message` accepts conversation history + user message, calls the LLM, and returns the AI reply + all extracted NDA fields + a `complete` boolean
+- LLM: LiteLLM via OpenRouter, Cerebras inference provider, model `openrouter/openai/gpt-oss-120b`, `reasoning_effort="low"`, Pydantic structured outputs (`ChatResponse` with `message`, `fields`, `complete`)
+- Stateless design: client maintains and sends the full conversation history on every request; no server-side session state
+- Preview panel (right side) updates live as the AI extracts fields; placeholders shown for unresolved fields
+- Download PDF button appears in the header only once all required fields are confirmed complete
+- `OPENROUTER_API_KEY` injected into the Docker container via `env_file: .env` in docker-compose.yml
 
 ### Current API Endpoints
-- `POST /api/auth/signup` - Create new user account
-- `POST /api/auth/signin` - Sign in and receive JWT cookie
-- `POST /api/auth/signout` - Clear auth cookie
-- `GET /api/auth/me` - Get current user info
-- `GET /api/documents` - List user's saved documents (auth required)
-- `POST /api/documents` - Save new document (auth required)
-- `GET /api/documents/{id}` - Get specific document (auth required)
-- `PUT /api/documents/{id}` - Update document (auth required)
-- `DELETE /api/documents/{id}` - Delete document (auth required)
-- `GET /api/chat/greeting` - Get AI greeting
-- `POST /api/chat/message` - Send chat message and get AI response
+- `POST /api/auth/signup` - Stub: accepts any credentials, returns email
+- `POST /api/auth/signin` - Stub: accepts any credentials, returns email
+- `POST /api/auth/signout` - Stub: returns 200
+- `GET /api/auth/me` - Stub: returns null user
+- `GET /api/chat/greeting` - Returns the AI's opening message
+- `POST /api/chat/message` - Sends a message; returns `{message, fields, complete}`
+- `POST /api/generate-pdf` - Generates Mutual NDA PDF via WeasyPrint
 - `GET /api/health` - Health check
+
+### Key Technical Notes
+- WeasyPrint requires system Pango/font libraries installed in the Dockerfile. The backend **must run inside Docker** — it cannot start natively on Mac without those libraries.
+- The Next.js API route for PDF generation has been removed; PDF is handled entirely by the FastAPI backend.
+- Frontend uses `NEXT_PUBLIC_API_URL` env var to configure the API base URL (defaults to empty string = same origin, which works when served through FastAPI).
+- `OPENROUTER_API_KEY` and `SESSION_SECRET` live in the `.env` file at the project root. `docker-compose.yml` passes them to the container via `env_file: .env`.
